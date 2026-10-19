@@ -10,10 +10,13 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up QEMU for aarch64
+        uses: docker/setup-qemu-action@v3
 
       - name: Install build dependencies
         run: |
@@ -28,7 +31,7 @@ jobs:
 
       - name: Build Alpine rootfs and DSH baseline
         run: |
-          sudo env PROFILE=full DSH_VERSION=0.2.1-rc.2 \
+          sudo env ALLOW_CROSS=1 PROFILE=full DSH_VERSION=0.2.1-rc.2 \
             scripts/build-rootfs.sh
 
       - name: Build KernelSU module ZIP
@@ -47,6 +50,7 @@ jobs:
           tag_name: v${{ steps.version.outputs.value }}
           name: DSH Alpine KSU ${{ steps.version.outputs.value }}
           prerelease: true
+          overwrite_files: true
           body: |
             DSH Alpine KSU ${{ steps.version.outputs.value }}
 
