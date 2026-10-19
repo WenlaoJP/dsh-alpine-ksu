@@ -1,0 +1,58 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates tar gzip python3
+
+      - name: Read module version
+        id: version
+        run: |
+          VERSION="$(sed -n 's/^version=//p' module.prop | head -1)"
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Alpine rootfs and DSH baseline
+        run: |
+          sudo env PROFILE=full DSH_VERSION=0.2.1-rc.2 \
+            scripts/build-rootfs.sh
+
+      - name: Build KernelSU module ZIP
+        run: |
+          scripts/build-module.sh
+
+      - name: Generate checksum
+        run: |
+          cd dist
+          sha256sum ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: DSH Alpine KSU ${{ steps.version.outputs.value }}
+          prerelease: true
+          body: |
+            DSH Alpine KSU ${{ steps.version.outputs.value }}
+
+            KernelSU module: Alpine Linux chroot + Node/npm/pnpm + DeepSeek Harness + ttyd.
+
+            See README.md for install and usage.
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS
