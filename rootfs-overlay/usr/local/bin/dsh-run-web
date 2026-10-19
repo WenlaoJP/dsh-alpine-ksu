@@ -1,0 +1,9 @@
+#!/bin/sh
+export HOME=/home/dsh
+export DSH_HOME=/home/dsh/.dsh
+export DSH_AGENTS_HOME=/home/dsh/.agents
+export DSH_TELEMETRY_DISABLED=1
+export TMPDIR=/home/dsh/tmp
+export PATH=/usr/local/bin:/usr/bin:/bin
+cd /sdcard/DSH/workspace 2>/dev/null || cd /home/dsh
+exec /usr/local/bin/dsh web --host 127.0.0.1 --port 3080 --no-open

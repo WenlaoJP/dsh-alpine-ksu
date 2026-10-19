@@ -1,0 +1,43 @@
+#!/bin/sh
+# Deterministically strip non-runtime payloads from a DSH npm prefix.
+set -eu
+DIR="${1:?usage: dsh-prune <dsh-prefix>}"
+[ -d "$DIR/node_modules" ] || { echo "dsh-prune: no node_modules under $DIR" >&2; exit 1; }
+cd "$DIR"
+
+find . -type f \( \
+    -name '*.ts' -o -name '*.tsx' -o -name '*.cts' -o -name '*.mts' \
+    -o -name '*.map' -o -name '*.d.ts' -o -name '*.md' -o -name '*.markdown' \
+    -o -name '*.pdb' -o -name '*.exe' -o -name '*.dll' \
+    -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hh' \
+    -o -name '*.o' -o -name '*.a' \) -delete
+
+find . -type d \( -name test -o -name tests -o -name __tests__ \
+    -o -name docs -o -name examples -o -name coverage -o -name .github \) \
+    -prune -exec rm -rf {} + 2>/dev/null || true
+
+find . -type d -path '*/node-pty/prebuilds/win32-*' -prune -exec rm -rf {} + 2>/dev/null || true
+find . -type d -path '*/node-pty/prebuilds/darwin-*' -prune -exec rm -rf {} + 2>/dev/null || true
+find . -type d -path '*/node-pty/prebuilds/linux-x64' -prune -exec rm -rf {} + 2>/dev/null || true
+
+rm -rf node_modules/@deepseek-ai/libreoffice-kit-wasm \
+       node_modules/sherpa-onnx-linux-arm64 \
+       node_modules/sherpa-onnx-linux-x64 2>/dev/null || true
+
+for d in $(find node_modules -type d -path '*/@img/sharp-*' 2>/dev/null); do
+    case "$d" in *linuxmusl-arm64*) : ;; *) rm -rf "$d" ;; esac
+done
+for d in $(find node_modules -type d -path '*/@img/sharp-libvips-*' 2>/dev/null); do
+    case "$d" in *linuxmusl-arm64*) : ;; *) rm -rf "$d" ;; esac
+done
+for d in $(find node_modules -type d -path '*/@esbuild/*' 2>/dev/null); do
+    case "$d" in *linux-arm64*) : ;; *) rm -rf "$d" ;; esac
+done
+for d in $(find node_modules -type d -path '*/@vscode/ripgrep-*' 2>/dev/null); do
+    case "$d" in *linux-arm64*) : ;; *) rm -rf "$d" ;; esac
+done
+for d in $(find node_modules -type d -path '*/@koromix/koffi-*' 2>/dev/null); do
+    case "$d" in *linux-arm64*) : ;; *) rm -rf "$d" ;; esac
+done
+
+find . -type d -empty -delete 2>/dev/null || true

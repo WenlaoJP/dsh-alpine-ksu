@@ -1,0 +1,12 @@
+#!/bin/sh
+export HOME=/home/dsh
+export DSH_HOME=/home/dsh/.dsh
+export DSH_AGENTS_HOME=/home/dsh/.agents
+export PATH=/usr/local/bin:/usr/bin:/bin
+export TMPDIR=/home/dsh/tmp
+DSH_BIN=/opt/dsh/current/node_modules/@deepseek-ai/dsh/lib/bin.js
+if [ ! -f "$DSH_BIN" ]; then
+    DSH_BIN="$(ls -d /opt/dsh/versions/*/node_modules/@deepseek-ai/dsh/lib/bin.js 2>/dev/null | sort -V | tail -1)"
+fi
+[ -n "$DSH_BIN" ] || { echo "dsh: no installed DSH version" >&2; exit 127; }
+exec node "$DSH_BIN" "$@"

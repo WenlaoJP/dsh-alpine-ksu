@@ -1,0 +1,7 @@
+DSH Alpine Terminal
+  dsh                 start DeepSeek Harness CLI
+  dsh web             local Web UI (normally started at boot)
+  dsh-update status   inspect versions
+  dsh-update next     manually follow upstream npm next
+  workspace:          /sdcard/DSH/workspace
+  npm/pnpm cache:     /sdcard/DSH/npm

@@ -1,0 +1,89 @@
+#!/bin/sh
+# Manual upstream update helper. Runs inside Alpine as UID 1.
+set -u
+export HOME=/home/dsh
+export DSH_HOME=/home/dsh/.dsh
+export PATH=/usr/local/bin:/usr/bin:/bin
+export npm_config_cache=/sdcard/DSH/npm/.npm-cache
+export npm_config_prefix=/sdcard/DSH/npm/.npm-global
+
+OPT=/opt/dsh
+CUR="$OPT/current"
+STATE=/run/dsh-state
+RUN=/run/dsh
+
+say() { echo "[dsh-update] $*"; }
+die() { echo "[dsh-update] ERROR: $*" >&2; exit 1; }
+
+current_version() {
+    [ -L "$CUR" ] || { echo none; return; }
+    basename "$(readlink "$CUR")"
+}
+
+case "${1:-latest}" in
+    status)
+        echo "current: $(current_version)"
+        echo "node:    $(node --version)"
+        echo "npm:     $(npm --version)"
+        echo "pnpm:    $(pnpm --version 2>/dev/null || echo missing)"
+        ls -1 "$OPT/versions" 2>/dev/null | sed 's/^/version: /'
+        ;;
+    check)
+        echo "latest=$(npm view @deepseek-ai/dsh dist-tags.latest)"
+        echo "next=$(npm view @deepseek-ai/dsh dist-tags.next)"
+        ;;
+    latest|next|stable)
+        if [ "${1}" = "stable" ] && [ -n "${2:-}" ]; then
+            VERSION="$2"
+        elif [ "${1}" = "next" ]; then
+            VERSION="$(npm view @deepseek-ai/dsh dist-tags.next)" || die "cannot query npm registry"
+        else
+            VERSION="$(npm view @deepseek-ai/dsh dist-tags.latest)" || die "cannot query npm registry"
+        fi
+        [ -n "$VERSION" ] || die "empty version"
+        TARGET="$OPT/versions/$VERSION"
+        [ -e "$TARGET/.installed" ] && say "version $VERSION already installed"
+        if [ ! -e "$TARGET/.installed" ]; then
+            mkdir -p "$TARGET"
+            say "installing @deepseek-ai/dsh@$VERSION"
+            ( cd "$TARGET" && npm init -y >/dev/null 2>&1 || true; npm install --no-audit --no-fund "@deepseek-ai/dsh@$VERSION" ) || die "npm install failed"
+            say "rebuilding node-pty"
+            ( cd "$TARGET" && npm rebuild node-pty --build-from-source ) || die "node-pty rebuild failed"
+            KDIR="$TARGET/node_modules/@koromix/koffi-linux-arm64"
+            if [ -d "$KDIR" ]; then
+                cat >"$KDIR/index.js" <<'KEOF'
+let native = null;
+let err = null;
+try { native = require("./musl_arm64/koffi.node"); } catch (e) { err = e; }
+if (native == null) throw err;
+module.exports = native;
+KEOF
+            fi
+            dsh-prune "$TARGET" || die "dsh-prune failed"
+            touch "$TARGET/.installed"
+        fi
+        say "smoke testing $VERSION"
+        ( cd "$TARGET" && node -e "require('node-pty'); require('koffi'); require('sharp'); console.log('native ok')" ) || die "native smoke test failed"
+        ( cd "$TARGET" && node node_modules/@deepseek-ai/dsh/lib/bin.js --version ) || die "dsh --version failed"
+        PREV="$(readlink "$CUR" 2>/dev/null || true)"
+        [ -n "$PREV" ] && printf '%s\n' "$PREV" >"$OPT/previous"
+        ln -sfn "versions/$VERSION" "$CUR"
+        mkdir -p "$STATE"
+        touch "$STATE/restart-dsh"
+        say "switched to $VERSION; dsh will restart"
+        ;;
+    rollback)
+        [ -s "$OPT/previous" ] || die "no previous version"
+        PREV="$(cat "$OPT/previous")"
+        [ -d "$PREV" ] || die "previous version missing: $PREV"
+        ln -sfn "versions/$(basename "$PREV")" "$CUR"
+        touch "$STATE/restart-dsh"
+        say "rolled back to $(basename "$PREV")"
+        ;;
+    *)
+        cat <<'USAGE'
+usage: dsh-update status|check|latest|next|stable [version]|rollback
+USAGE
+        exit 2
+        ;;
+esac

@@ -1,0 +1,11 @@
+# Optional initrc path. Kept disabled in the default build.
+service dsh_alpine /data/adb/modules/dsh_alpine/bin/dsh-launch
+    class late_start
+    seclabel u:r:ksu:s0
+    oom_score_adjust -1000
+    priority -5
+    restart_period 10
+    disabled
+
+on property:sys.boot_completed=1
+    start dsh_alpine

@@ -1,0 +1,64 @@
+#!/bin/sh
+# UID 1 supervisor: keeps dsh web and ttyd alive.
+set -u
+STATE=/run/dsh-state
+RUN=/run/dsh
+LOG=/var/log/dsh
+mkdir -p "$STATE" "$RUN" "$LOG"
+
+echo $$ >"$RUN/supervisor.pid"
+echo "[$(date)] supervisor pid=$$ uid=$(id -u)" >>"$LOG/supervisor.log"
+
+alive() {
+    [ -n "${1:-}" ] && [ -f "$1" ] && kill -0 "$(cat "$1" 2>/dev/null)" 2>/dev/null
+}
+
+rotate() {
+    [ -f "$1" ] || return 0
+    SIZE=$(wc -c <"$1" 2>/dev/null || echo 0)
+    [ "$SIZE" -gt 8388608 ] && mv -f "$1" "$1.1"
+}
+
+start_dsh() {
+    if alive "$RUN/dsh.pid"; then return 0; fi
+    rotate "$LOG/dsh.log"
+    echo "[$(date)] starting dsh web" >>"$LOG/supervisor.log"
+    ( cd /sdcard/DSH/workspace 2>/dev/null || cd /home/dsh; exec /usr/local/bin/dsh-run-web ) >>"$LOG/dsh.log" 2>&1 &
+    echo $! >"$RUN/dsh.pid"
+}
+
+update_state() {
+    URL="$(grep -oE 'http://127\.0\.0\.1:3080/\?token=[A-Za-z0-9_-]+' "$LOG/dsh.log" 2>/dev/null | tail -1)"
+    if [ -n "$URL" ]; then
+        printf '%s\n' "$URL" >"$STATE/dsh-url.txt"
+        chmod 600 "$STATE/dsh-url.txt" 2>/dev/null || true
+    fi
+    if [ -s "$STATE/ttyd.pass" ]; then
+        printf 'dsh:%s\n' "$(cat "$STATE/ttyd.pass")" >"$STATE/ttyd-auth.txt"
+        chmod 600 "$STATE/ttyd-auth.txt" 2>/dev/null || true
+    fi
+}
+
+start_ttyd() {
+    if alive "$RUN/ttyd.pid"; then return 0; fi
+    rotate "$LOG/ttyd.log"
+    PASS="$(cat "$STATE/ttyd.pass" 2>/dev/null || true)"
+    [ -n "$PASS" ] || return 0
+    echo "[$(date)] starting ttyd" >>"$LOG/supervisor.log"
+    ttyd -W -i 127.0.0.1 -p 7681 -c "dsh:${PASS}" \
+        tmux new -A -s main -c /sdcard/DSH/workspace >>"$LOG/ttyd.log" 2>&1 &
+    echo $! >"$RUN/ttyd.pid"
+}
+
+while :; do
+    if [ -f "$STATE/restart-dsh" ]; then
+        rm -f "$STATE/restart-dsh"
+        echo "[$(date)] restart requested" >>"$LOG/supervisor.log"
+        [ -f "$RUN/dsh.pid" ] && kill "$(cat "$RUN/dsh.pid" 2>/dev/null)" 2>/dev/null || true
+        rm -f "$RUN/dsh.pid"
+    fi
+    start_dsh
+    start_ttyd
+    update_state
+    sleep 2
+done

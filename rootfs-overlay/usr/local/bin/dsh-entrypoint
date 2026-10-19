@@ -1,0 +1,31 @@
+#!/bin/sh
+# Runs inside Alpine as UID 1 after chroot + setpriv.
+set -u
+export HOME=/home/dsh
+export DSH_HOME=/home/dsh/.dsh
+export DSH_AGENTS_HOME=/home/dsh/.agents
+export SHELL=/bin/bash
+export TERM=xterm-256color
+export LANG=C.UTF-8
+export TMPDIR=/home/dsh/tmp
+export DSH_TELEMETRY_DISABLED=1
+export PATH=/usr/local/bin:/usr/bin:/bin
+export npm_config_cache=/sdcard/DSH/npm/.npm-cache
+export npm_config_prefix=/sdcard/DSH/npm/.npm-global
+export PNPM_HOME=/sdcard/DSH/npm/.pnpm
+export PNPM_STORE_DIR=/sdcard/DSH/npm/.pnpm-store
+
+mkdir -p "$HOME" "$HOME/tmp" "$DSH_HOME" "$DSH_AGENTS_HOME" \
+    /sdcard/DSH/workspace /sdcard/DSH/npm \
+    /run/dsh /run/dsh-state /var/log/dsh 2>/dev/null || true
+
+ln -sfn /sdcard/DSH/workspace /workspace
+ln -sfn /sdcard/DSH/npm /npm
+
+PASS_FILE=/run/dsh-state/ttyd.pass
+if [ ! -s "$PASS_FILE" ]; then
+    head -c 32 /dev/urandom | base64 | tr -d '\n' >"$PASS_FILE"
+    chmod 600 "$PASS_FILE"
+fi
+
+exec /usr/local/bin/dsh-supervisor
