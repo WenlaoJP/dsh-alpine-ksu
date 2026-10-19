@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSH Alpine Terminal</title>
+<style>
+  :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --muted:#8b949e; --ok:#3fb950; --bad:#f85149; --accent:#58a6ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin-bottom:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { background:#21262d; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:9px 12px; font-size:14px; }
+  button.primary { background:#1f6feb; border-color:#1f6feb; }
+  pre { white-space:pre-wrap; word-break:break-all; background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:320px; overflow:auto; }
+  .kv { display:grid; grid-template-columns:130px 1fr; gap:6px 10px; }
+  .k { color:var(--muted); }
+  .v { word-break:break-all; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .url { display:block; background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:10px; word-break:break-all; color:var(--accent); user-select:all; }
+  .pass { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; user-select:all; }
+  #msg { min-height:20px; color:var(--muted); margin-top:8px; }
+</style>
+</head>
+<body>
+<h1>DSH Alpine Terminal</h1>
+<div class="sub">Alpine chroot · UID 1 · DeepSeek Harness · ttyd</div>
+
+<div class="card">
+  <div class="row">
+    <button onclick="refresh()">刷新</button>
+    <button class="primary" onclick="act('open dsh')">从浏览器打开 DSH</button>
+    <button onclick="act('open ttyd')">从浏览器打开终端</button>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<div class="card">
+  <div class="kv" id="status"><div class="k">状态</div><div class="v">点击“刷新”读取</div></div>
+</div>
+
+<div class="card">
+  <div class="k">DSH 直链（可长按复制）</div>
+  <div id="dshUrl" class="url">尚未生成</div>
+  <div class="k" style="margin-top:10px">终端密码</div>
+  <div id="ttydPass" class="pass">尚未生成</div>
+  <div class="sub" style="margin:8px 0 0">终端用户名固定为 <b>dsh</b>。DSH 直链必须带 token；裸 3080 返回 401 是正常认证提示。</div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button onclick="showLog('dsh')">DSH 日志</button>
+    <button onclick="showLog('bootstrap')">启动日志</button>
+    <button onclick="showLog('diag')">诊断</button>
+  </div>
+  <pre id="log">点击按钮加载日志</pre>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var ACTION = '/data/adb/modules/dsh_alpine/action.sh';
+  var seq = 0, busy = false;
+
+  function msg(s, bad) {
+    var el = document.getElementById('msg');
+    el.textContent = s || '';
+    el.className = bad ? 'bad' : '';
+  }
+  function execCmd(cmd) {
+    return new Promise(function (resolve, reject) {
+      if (typeof ksu === 'undefined' || typeof ksu.exec !== 'function') {
+        reject(new Error('KernelSU WebUI bridge 不可用'));
+        return;
+      }
+      var name = '__dsh_ui_' + Date.now() + '_' + (++seq);
+      var timer = setTimeout(function () {
+        try { delete window[name]; } catch (e) {}
+        reject(new Error('timeout'));
+      }, 20000);
+      window[name] = function (errno, stdout, stderr) {
+        clearTimeout(timer);
+        try { delete window[name]; } catch (e) {}
+        resolve({ errno: errno, stdout: stdout || '', stderr: stderr || '' });
+      };
+      try { ksu.exec(cmd, '{}', name); }
+      catch (e) {
+        clearTimeout(timer);
+        try { delete window[name]; } catch (e2) {}
+        reject(e);
+      }
+    });
+  }
+  function parse(s) {
+    var o = {};
+    String(s || '').split('\n').forEach(function (line) {
+      var i = line.indexOf('=');
+      if (i > 0) o[line.slice(0, i)] = line.slice(i + 1);
+    });
+    return o;
+  }
+  function row(k, v) {
+    var p = document.getElementById('status');
+    var a = document.createElement('div'); a.className = 'k'; a.textContent = k;
+    var b = document.createElement('div'); b.className = 'v';
+    b.textContent = (v === undefined || v === null || v === '') ? 'none' : String(v);
+    p.appendChild(a); p.appendChild(b);
+  }
+
+  async function refresh() {
+    if (busy) return;
+    busy = true; msg('读取中…');
+    try {
+      var r = await execCmd('sh ' + ACTION + ' status');
+      if (r.errno !== 0) throw new Error(r.stderr || ('exit ' + r.errno));
+      var d = parse(r.stdout);
+      var st = document.getElementById('status');
+      st.innerHTML = '';
+      row('supervisor', (d.supervisor_pid || 'none') + ' / uid ' + (d.supervisor_uid || 'none'));
+      row('dsh', (d.dsh_pid || 'none') + ' / uid ' + (d.dsh_uid || 'none'));
+      row('ttyd', (d.ttyd_pid || 'none') + ' / uid ' + (d.ttyd_uid || 'none'));
+      row('rootfs', d.rootfs_version || 'none');
+      row('dsh version', d.dsh_version || 'none');
+      document.getElementById('dshUrl').textContent = (d.dsh_url && d.dsh_url !== 'none') ? d.dsh_url : '尚未生成，请查看启动日志';
+      document.getElementById('ttydPass').textContent = d.ttyd_pass || 'none';
+      msg('已刷新');
+    } catch (e) {
+      msg('读取失败: ' + (e && e.message ? e.message : e), true);
+    } finally { busy = false; }
+  }
+
+  async function act(args) {
+    if (busy) return;
+    busy = true; msg('执行中…');
+    try {
+      var r = await execCmd('sh ' + ACTION + ' ' + args);
+      if (r.errno !== 0) throw new Error(r.stderr || r.stdout || ('exit ' + r.errno));
+      msg(r.stdout || '已发送打开请求');
+    } catch (e) {
+      msg('失败: ' + (e && e.message ? e.message : e), true);
+    } finally { busy = false; }
+  }
+
+  async function showLog(kind) {
+    try {
+      var r = kind === 'diag' ? await execCmd('sh ' + ACTION + ' diag') : await execCmd('sh ' + ACTION + ' log ' + kind);
+      document.getElementById('log').textContent = r.stdout || r.stderr || '(empty)';
+    } catch (e) {
+      document.getElementById('log').textContent = '读取失败: ' + (e && e.message ? e.message : e);
+    }
+  }
+
+  window.refresh = refresh;
+  window.act = act;
+  window.showLog = showLog;
+  window.onerror = function (m) { msg('页面错误: ' + m, true); };
+  setTimeout(refresh, 500);
+})();
+</script>
+</body>
+</html>
