@@ -1,0 +1,8 @@
+/build/
+/dist/
+/build-sign/
+/payload/*.tar.gz
+/payload/ROOTFS_VERSION
+*.zip
+*.asc
+*.sha256

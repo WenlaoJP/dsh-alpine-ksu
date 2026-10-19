@@ -1,0 +1,104 @@
+#!/system/bin/sh
+# Action/WebUI helper. Runs as root from KernelSU.
+case "$0" in
+  */*) MODDIR=${0%/*} ;;
+  *)   MODDIR=$(pwd) ;;
+esac
+DATA=/data/adb/dsh
+STATE="$DATA/state"
+RUN="$DATA/run"
+LOGD="$DATA/logs"
+
+alive() { [ -n "${1:-}" ] && [ -f "$1" ] && kill -0 "$(cat "$1" 2>/dev/null)" 2>/dev/null; }
+pid_of() { alive "$1" && cat "$1" 2>/dev/null || echo none; }
+uid_of() {
+    P="$1"
+    [ "$P" = none ] && { echo none; return; }
+    awk '/^Uid:/{print $2; exit}' "/proc/$P/status" 2>/dev/null | sed 's/^$/none/'
+}
+dsh_url() {
+    U="$(cat "$STATE/dsh-url.txt" 2>/dev/null || true)"
+    [ -n "$U" ] || U="$(tail -n 500 "$LOGD/dsh.log" 2>/dev/null | grep -oE 'http://127\.0\.0\.1:3080/\?token=[A-Za-z0-9_-]+' | tail -1)"
+    echo "${U:-none}"
+}
+open_url() {
+    U="$1"
+    [ -n "$U" ] && [ "$U" != none ] || { echo "no URL available" >&2; return 1; }
+    am start --user 0 -a android.intent.action.VIEW -d "$U" -f 0x10000000 2>&1
+}
+
+case "${1:-status}" in
+    status)
+        SP="$(pid_of "$RUN/supervisor.pid")"
+        DP="$(pid_of "$RUN/dsh.pid")"
+        TP="$(pid_of "$RUN/ttyd.pid")"
+        echo "supervisor_pid=$SP"
+        echo "supervisor_uid=$(uid_of "$SP")"
+        echo "dsh_pid=$DP"
+        echo "dsh_uid=$(uid_of "$DP")"
+        echo "ttyd_pid=$TP"
+        echo "ttyd_uid=$(uid_of "$TP")"
+        echo "rootfs_version=$(cat "$DATA/.rootfs-version" 2>/dev/null || echo none)"
+        CUR="$(readlink "$DATA/opt/dsh/current" 2>/dev/null || true)"
+        if [ -n "$CUR" ]; then echo "dsh_version=${CUR##*/}"; else echo "dsh_version=none"; fi
+        echo "ttyd_user=dsh"
+        echo "ttyd_pass=$(cat "$STATE/ttyd.pass" 2>/dev/null || echo none)"
+        echo "dsh_url=$(dsh_url)"
+        echo "ttyd_url=http://127.0.0.1:7681/"
+        ;;
+    open)
+        case "${2:-dsh}" in
+            dsh) open_url "$(dsh_url)" ;;
+            ttyd) open_url "http://127.0.0.1:7681/" ;;
+            *) echo "usage: action.sh open dsh|ttyd" >&2; exit 2 ;;
+        esac
+        ;;
+    log)
+        case "${2:-dsh}" in
+            dsh) tail -n 300 "$LOGD/dsh.log" 2>/dev/null ;;
+            bootstrap) tail -n 300 "$LOGD/bootstrap.log" 2>/dev/null; tail -n 100 "$LOGD/bootstrap-launch.log" 2>/dev/null ;;
+            launch) tail -n 300 "$LOGD/launch.log" 2>/dev/null ;;
+            supervisor) tail -n 300 "$LOGD/supervisor.log" 2>/dev/null ;;
+            service) tail -n 300 "$LOGD/service.log" 2>/dev/null; tail -n 300 "$LOGD/boot-completed.log" 2>/dev/null ;;
+            ttyd) tail -n 300 "$LOGD/ttyd.log" 2>/dev/null ;;
+            *) echo "usage: action.sh log dsh|bootstrap|launch|supervisor|service|ttyd" >&2; exit 2 ;;
+        esac
+        ;;
+    diag)
+        echo "=== status ==="; sh "$MODDIR/action.sh" status
+        echo "=== bootstrap.log ==="; tail -n 200 "$LOGD/bootstrap.log" 2>/dev/null
+        echo "=== bootstrap-launch.log ==="; tail -n 100 "$LOGD/bootstrap-launch.log" 2>/dev/null
+        echo "=== launch.log ==="; tail -n 150 "$LOGD/launch.log" 2>/dev/null
+        echo "=== service.log ==="; tail -n 100 "$LOGD/service.log" 2>/dev/null
+        echo "=== boot-completed.log ==="; tail -n 100 "$LOGD/boot-completed.log" 2>/dev/null
+        echo "=== supervisor.log ==="; tail -n 100 "$LOGD/supervisor.log" 2>/dev/null
+        echo "=== dsh.log ==="; tail -n 200 "$LOGD/dsh.log" 2>/dev/null
+        echo "=== ttyd.log ==="; tail -n 100 "$LOGD/ttyd.log" 2>/dev/null
+        echo "=== mounts ==="; grep -E 'dsh|rootfs|sdcard' /proc/mounts 2>/dev/null | head -80
+        ;;
+    start)
+        setsid "$MODDIR/bin/dsh-launch" >>"$LOGD/action.log" 2>&1 &
+        ;;
+    stop)
+        for f in "$RUN/dsh.pid" "$RUN/ttyd.pid" "$RUN/supervisor.pid"; do
+            [ -f "$f" ] && kill "$(cat "$f" 2>/dev/null)" 2>/dev/null || true
+        done
+        sleep 1
+        for f in "$RUN/dsh.pid" "$RUN/ttyd.pid" "$RUN/supervisor.pid"; do
+            [ -f "$f" ] && kill -9 "$(cat "$f" 2>/dev/null)" 2>/dev/null || true
+            rm -f "$f"
+        done
+        rm -rf "$RUN/launch.lock" "$RUN/bootstrap.lock"
+        for m in sdcard home/dsh opt/dsh var/log/dsh run/dsh run/dsh-state dev/pts dev sys proc; do
+            umount -l "$DATA/rootfs/$m" 2>/dev/null || true
+        done
+        ;;
+    restart)
+        sh "$MODDIR/action.sh" stop
+        sh "$MODDIR/action.sh" start
+        ;;
+    *)
+        echo "usage: action.sh status|open dsh|open ttyd|log [dsh|bootstrap|launch|supervisor|service|ttyd]|diag|start|stop|restart"
+        exit 2
+        ;;
+esac

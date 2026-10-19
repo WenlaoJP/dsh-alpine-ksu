@@ -1,0 +1,6 @@
+id=dsh_alpine
+name=DSH Alpine Terminal
+version=0.1.7-poc
+versionCode=8
+author=DSH Project
+description=Alpine Linux chroot with Node.js, npm, pnpm, DeepSeek Harness and ttyd. Starts at boot as UID 1 via a non-blocking service.sh + watchdog.
