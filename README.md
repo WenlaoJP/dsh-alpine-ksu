@@ -39,8 +39,7 @@ KernelSU module
 
 ## 系统要求
 
-- Android 16 arm64
-- KernelSU / LKM；ReSukiSU 已测试
+- 内核版本 >= 5.10
 - 建议至少 2GB 可用空间
 - 16KB page-size 兼容设备
 
@@ -57,12 +56,6 @@ KernelSU module
 cat /data/adb/dsh/logs/bootstrap.log
 ```
 
-正常结束时最后一行应为：
-
-```text
-bootstrap done
-```
-
 > 首次解压完成前 DSH 端口暂时不可用，这是正常现象。
 
 ## 使用
@@ -77,7 +70,7 @@ DSH 使用 token 认证。裸 `http://127.0.0.1:3080/` 返回 `401` 是正常行
 cat /data/adb/dsh/state/dsh-url.txt
 ```
 
-也可以打开模块 WebUI，查看“DSH 直链”，然后点击：
+也可以打开模块 WebUI，查看直链/点击：
 
 ```text
 从浏览器打开 DSH
@@ -102,15 +95,6 @@ cat /data/adb/dsh/state/dsh-url.txt
 cat /data/adb/dsh/state/ttyd-auth.txt
 ```
 
-WebUI 显示：
-
-- supervisor / dsh / ttyd 的 PID 和 UID
-- rootfs 版本、DSH 版本
-- DSH token 直链
-- 终端密码
-- DSH 日志、启动日志、诊断
-
-WebUI 不直接内嵌打开 DSH；使用“从浏览器打开”按钮通过 Android 系统浏览器打开。
 
 ## 更新 DSH
 
@@ -127,37 +111,6 @@ dsh-update rollback
 
 不建议用 `npx` 升级正式服务；`npx` 只适合临时测试，不会更新 `/opt/dsh/current`。
 
-## 故障排查
-
-### 3080 返回 authentication required
-
-正常，使用：
-
-```sh
-cat /data/adb/dsh/state/dsh-url.txt
-```
-
-### 卡在开机动画 / 无法开机
-
-进入 recovery 或 adb，禁用模块：
-
-```sh
-touch /data/adb/modules/dsh_alpine/disable
-```
-
-或删除：
-
-```sh
-rm -rf /data/adb/modules/dsh_alpine
-```
-
-### 解压失败
-
-```sh
-cat /data/adb/dsh/logs/bootstrap.log
-```
-
-常见原因是 `/data` 空间不足或 payload 不完整。
 
 ## 构建
 
@@ -184,8 +137,6 @@ dist/dsh_alpine-<version>.zip
 - DSH 使用 token + Cookie + Host/Origin 校验；
 - ttyd 使用随机 Basic Auth；
 - 安全边界是 chroot + UID 1，不是虚拟机；
-- DSH 插件可执行任意代码，请只安装可信插件；
-- DSH 不包含本地模型，需要自行配置 API Key。
 
 ## License
 
