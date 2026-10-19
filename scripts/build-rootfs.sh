@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build an Alpine aarch64 rootfs and a DSH baseline payload.
-# Must run on an aarch64 Linux host with root.
+# Runs natively on aarch64, or via QEMU binfmt on x86_64 with ALLOW_CROSS=1.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,10 +16,14 @@ PAYLOAD="$ROOT/payload"
 log() { echo -e "\033[1;36m[build-rootfs]\033[0m $*"; }
 die() { echo "[build-rootfs] ERROR: $*" >&2; exit 1; }
 need_root() { [ "$(id -u)" = "0" ] || die "run as root"; }
-need_arm64() { [ "$(uname -m)" = "aarch64" ] || die "must build on aarch64 (found $(uname -m))"; }
+need_arch() {
+    if [ "$(uname -m)" = "aarch64" ]; then return 0; fi
+    [ "${ALLOW_CROSS:-0}" = "1" ] || die "must build on aarch64 (set ALLOW_CROSS=1 for QEMU cross-build)"
+    [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || die "qemu-aarch64 binfmt is not registered"
+}
 
 need_root
-need_arm64
+need_arch
 mkdir -p "$BUILD" "$CACHE" "$PAYLOAD"
 
 if [ ! -f "$CACHE/alpine-minirootfs-${ALPINE_VERSION}-aarch64.tar.gz" ]; then
