@@ -1,0 +1,59 @@
+#!/system/bin/sh
+# One-time, background runtime extraction. Never called from the KernelSU
+# installer or from a blocking boot script.
+case "$0" in
+  */*) SCRIPT_DIR=${0%/*} ;;
+  *)   SCRIPT_DIR=. ;;
+esac
+MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)
+DATA=/data/adb/dsh
+PAYLOAD="$MODDIR/payload"
+ROOTFS_VER="$(cat "$PAYLOAD/ROOTFS_VERSION" 2>/dev/null || echo unknown)"
+MARK="$DATA/.rootfs-version"
+LOCK="$DATA/run/bootstrap.lock"
+LOG="$DATA/logs/bootstrap.log"
+mkdir -p "$DATA/logs" "$DATA/run" "$DATA/opt/dsh" "$DATA/home" "$DATA/state"
+
+log() { echo "[$(date)] $*" >>"$LOG"; }
+
+if [ -f "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$ROOTFS_VER" ] \
+   && [ -L "$DATA/opt/dsh/current" ]; then
+    exit 0
+fi
+
+if [ -d "$LOCK" ]; then
+    OLD="$(cat "$LOCK/pid" 2>/dev/null)"
+    if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then
+        exit 0
+    fi
+    rm -rf "$LOCK"
+fi
+mkdir "$LOCK" 2>/dev/null || exit 0
+echo $$ >"$LOCK/pid"
+
+if [ -x /data/adb/ksu/bin/busybox ]; then BB=/data/adb/ksu/bin/busybox; else BB=busybox; fi
+
+log "bootstrap start; target=$ROOTFS_VER"
+if [ ! -d "$DATA/rootfs" ] || [ "$(cat "$MARK" 2>/dev/null)" != "$ROOTFS_VER" ]; then
+    log "extracting rootfs"
+    rm -rf "$DATA/rootfs.new" "$DATA/rootfs.old"
+    mkdir -p "$DATA/rootfs.new" || { log "mkdir rootfs.new failed"; exit 1; }
+    "$BB" tar -xzf "$PAYLOAD/rootfs.tar.gz" -C "$DATA/rootfs.new" || { log "rootfs extraction failed"; exit 1; }
+    [ -d "$DATA/rootfs" ] && mv "$DATA/rootfs" "$DATA/rootfs.old"
+    mv "$DATA/rootfs.new" "$DATA/rootfs" || { log "rootfs swap failed"; exit 1; }
+    rm -rf "$DATA/rootfs.old"
+    printf '%s\n' "$ROOTFS_VER" >"$MARK"
+    log "rootfs ready"
+fi
+
+if [ ! -L "$DATA/opt/dsh/current" ]; then
+    log "extracting DSH baseline"
+    "$BB" tar -xzf "$PAYLOAD/dsh-baseline.tar.gz" -C "$DATA/opt/dsh" || { log "dsh extraction failed"; exit 1; }
+    log "DSH baseline ready"
+fi
+
+log "setting ownership"
+chown -R 1:1 "$DATA/home" "$DATA/opt/dsh" "$DATA/logs" "$DATA/run" "$DATA/state" 2>/dev/null || true
+log "bootstrap done"
+rm -rf "$LOCK"
+exit 0

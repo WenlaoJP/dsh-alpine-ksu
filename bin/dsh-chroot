@@ -1,0 +1,49 @@
+#!/system/bin/sh
+# Mount the required Android filesystems and persistent data, then enter Alpine
+# and permanently drop to UID 1. No root process remains after exec.
+set -u
+DATA=/data/adb/dsh
+ROOTFS="$DATA/rootfs"
+BB=/data/adb/ksu/bin/busybox
+[ -x "$BB" ] || BB=/system/bin/busybox
+[ -x "$BB" ] || BB=/system/bin/toybox
+
+log() { echo "[$(date)] $*" >>"$DATA/logs/launch.log"; }
+die() { log "FATAL: $*"; exit 1; }
+
+[ -d "$ROOTFS" ] || die "rootfs missing: $ROOTFS"
+[ -x "$ROOTFS/bin/setpriv" ] || die "setpriv missing in rootfs"
+[ -x "$ROOTFS/usr/local/bin/dsh-entrypoint" ] || die "dsh-entrypoint missing"
+
+for d in dev dev/pts proc sys sdcard home/dsh opt/dsh var/log/dsh run/dsh run/dsh-state; do
+    mkdir -p "$ROOTFS/$d"
+done
+
+# Make this mount namespace private where possible.
+mount --make-rprivate / 2>/dev/null || true
+
+is_mounted() { grep -F " $1 " /proc/mounts >/dev/null 2>&1; }
+bind_one() {
+    SRC="$1"; DST="$2"
+    is_mounted "$DST" && return 0
+    mount -o bind "$SRC" "$DST" 2>/dev/null || mount --bind "$SRC" "$DST" 2>/dev/null || die "bind $SRC -> $DST"
+}
+bind_one /dev "$ROOTFS/dev"
+if ! is_mounted "$ROOTFS/dev/pts"; then
+    mount -o bind /dev/pts "$ROOTFS/dev/pts" 2>/dev/null || mount --bind /dev/pts "$ROOTFS/dev/pts" 2>/dev/null || die "bind /dev/pts"
+fi
+bind_one /proc "$ROOTFS/proc"
+bind_one /sys "$ROOTFS/sys"
+SDCARD_SRC=/storage/emulated/0
+[ -d "$SDCARD_SRC" ] || SDCARD_SRC=/sdcard
+bind_one "$SDCARD_SRC" "$ROOTFS/sdcard"
+bind_one "$DATA/home" "$ROOTFS/home/dsh"
+bind_one "$DATA/opt/dsh" "$ROOTFS/opt/dsh"
+bind_one "$DATA/logs" "$ROOTFS/var/log/dsh"
+bind_one "$DATA/run" "$ROOTFS/run/dsh"
+bind_one "$DATA/state" "$ROOTFS/run/dsh-state"
+
+# UID 1, Android inet/sdcard groups, no capabilities after setuid, no_new_privs.
+exec "$BB" chroot "$ROOTFS" /bin/setpriv \
+    --reuid=1 --regid=1 --groups=3003,1015,1023,1028 --no-new-privs \
+    /usr/local/bin/dsh-entrypoint

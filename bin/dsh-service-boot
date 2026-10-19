@@ -1,0 +1,21 @@
+#!/system/bin/sh
+# Background boot helper. Extract Alpine/DSH, then start the watchdog.
+case "$0" in
+  */*) SCRIPT_DIR=${0%/*} ;;
+  *)   SCRIPT_DIR=. ;;
+esac
+MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)
+DATA=/data/adb/dsh
+PIDFILE="$DATA/run/supervisor.pid"
+echo -1000 > /proc/self/oom_score_adj 2>/dev/null || true
+sleep 10
+while ! "$MODDIR/bin/dsh-bootstrap" >>"$DATA/logs/bootstrap-launch.log" 2>&1; do
+    sleep 10
+done
+if [ -f "$PIDFILE" ]; then
+    PID="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+        exit 0
+    fi
+fi
+exec "$MODDIR/bin/dsh-watchdog"

@@ -1,0 +1,39 @@
+#!/system/bin/sh
+# Root -> UID 1 launcher.
+# Acquires a single-instance lock, then execs dsh-chroot (mount + chroot + setpriv).
+case "$0" in
+  */*) SCRIPT_DIR=${0%/*} ;;
+  *)   SCRIPT_DIR=. ;;
+esac
+MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)
+DATA=/data/adb/dsh
+RUN="$DATA/run"
+LOCK="$RUN/launch.lock"
+mkdir -p "$RUN" "$DATA/logs" "$DATA/state" "$DATA/home" "$DATA/opt/dsh" "$DATA/npm-global" "$DATA/npm-cache" "$DATA/pnpm-store"
+
+# Inherited by all children.
+echo -1000 > /proc/self/oom_score_adj 2>/dev/null || true
+
+if [ -d "$LOCK" ]; then
+    OLD="$(cat "$LOCK/pid" 2>/dev/null)"
+    if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then
+        exit 0
+    fi
+    rm -rf "$LOCK"
+fi
+if ! mkdir "$LOCK" 2>/dev/null; then
+    exit 0
+fi
+echo $$ > "$LOCK/pid"
+echo $$ > "$RUN/supervisor.pid"
+
+SDCARD=/storage/emulated/0
+[ -d "$SDCARD" ] || SDCARD=/sdcard
+mkdir -p "$SDCARD/DSH/workspace" "$SDCARD/DSH/npm" 2>/dev/null || true
+chown 1:1 "$SDCARD/DSH" "$SDCARD/DSH/workspace" "$SDCARD/DSH/npm" 2>/dev/null || true
+
+if command -v unshare >/dev/null 2>&1 && unshare -m true 2>/dev/null; then
+    exec unshare -m "$MODDIR/bin/dsh-chroot"
+fi
+[ -d "$DATA/rootfs" ] || exit 1
+exec "$MODDIR/bin/dsh-chroot"
