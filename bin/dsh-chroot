@@ -41,7 +41,14 @@ bind_one /sys "$ROOTFS/sys"
 SDCARD_SRC=/data/media/0
 [ -d "$SDCARD_SRC" ] || SDCARD_SRC=/storage/emulated/0
 [ -d "$SDCARD_SRC" ] || SDCARD_SRC=/sdcard
+# /sdcard may already have an old FUSE bind mounted at this target. A plain
+# is_mounted check would keep that old FUSE layer and never expose /data/media/0.
+# Drop every stacked mount at the target, then bind the raw media view.
+while is_mounted "$ROOTFS/sdcard"; do
+    umount -l "$ROOTFS/sdcard" 2>/dev/null || break
+done
 bind_one "$SDCARD_SRC" "$ROOTFS/sdcard"
+log "sdcard source=$SDCARD_SRC"
 
 bind_one "$DATA/home" "$ROOTFS/home/dsh"
 bind_one "$DATA/opt/dsh" "$ROOTFS/opt/dsh"
