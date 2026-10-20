@@ -6,10 +6,13 @@ case "$0" in
 esac
 MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)
 DATA=/data/adb/dsh
-mkdir -p "$DATA/run" "$DATA/logs"
+STATE="$DATA/state"
+mkdir -p "$DATA/run" "$DATA/logs" "$STATE"
+echo $$ >"$DATA/run/watchdog.pid"
 echo -1000 > /proc/self/oom_score_adj 2>/dev/null || true
 
 while :; do
+    [ -f "$STATE/stopped" ] && exit 0
     "$MODDIR/bin/dsh-launch" >>"$DATA/logs/watchdog.log" 2>&1
     echo "[$(date)] dsh-launch exited: $?" >>"$DATA/logs/watchdog.log"
     sleep 10

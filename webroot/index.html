@@ -31,6 +31,11 @@
 <div class="card">
   <div class="row">
     <button onclick="refresh()">刷新</button>
+    <button class="primary" onclick="act('start')">启动服务</button>
+    <button onclick="act('restart')">重启服务</button>
+    <button onclick="act('stop')">停止服务</button>
+  </div>
+  <div class="row" style="margin-top:8px">
     <button class="primary" onclick="act('open dsh')">从浏览器打开 DSH</button>
     <button onclick="act('open ttyd')">从浏览器打开终端</button>
   </div>
@@ -63,61 +68,25 @@
   'use strict';
   var ACTION = '/data/adb/modules/dsh_alpine/action.sh';
   var seq = 0, busy = false;
-
-  function msg(s, bad) {
-    var el = document.getElementById('msg');
-    el.textContent = s || '';
-    el.className = bad ? 'bad' : '';
-  }
+  function msg(s, bad) { var el = document.getElementById('msg'); el.textContent = s || ''; el.className = bad ? 'bad' : ''; }
   function execCmd(cmd) {
     return new Promise(function (resolve, reject) {
-      if (typeof ksu === 'undefined' || typeof ksu.exec !== 'function') {
-        reject(new Error('KernelSU WebUI bridge 不可用'));
-        return;
-      }
+      if (typeof ksu === 'undefined' || typeof ksu.exec !== 'function') { reject(new Error('KernelSU WebUI bridge 不可用')); return; }
       var name = '__dsh_ui_' + Date.now() + '_' + (++seq);
-      var timer = setTimeout(function () {
-        try { delete window[name]; } catch (e) {}
-        reject(new Error('timeout'));
-      }, 20000);
-      window[name] = function (errno, stdout, stderr) {
-        clearTimeout(timer);
-        try { delete window[name]; } catch (e) {}
-        resolve({ errno: errno, stdout: stdout || '', stderr: stderr || '' });
-      };
-      try { ksu.exec(cmd, '{}', name); }
-      catch (e) {
-        clearTimeout(timer);
-        try { delete window[name]; } catch (e2) {}
-        reject(e);
-      }
+      var timer = setTimeout(function () { try { delete window[name]; } catch (e) {} reject(new Error('timeout')); }, 20000);
+      window[name] = function (errno, stdout, stderr) { clearTimeout(timer); try { delete window[name]; } catch (e) {} resolve({ errno: errno, stdout: stdout || '', stderr: stderr || '' }); };
+      try { ksu.exec(cmd, '{}', name); } catch (e) { clearTimeout(timer); try { delete window[name]; } catch (e2) {} reject(e); }
     });
   }
-  function parse(s) {
-    var o = {};
-    String(s || '').split('\n').forEach(function (line) {
-      var i = line.indexOf('=');
-      if (i > 0) o[line.slice(0, i)] = line.slice(i + 1);
-    });
-    return o;
-  }
-  function row(k, v) {
-    var p = document.getElementById('status');
-    var a = document.createElement('div'); a.className = 'k'; a.textContent = k;
-    var b = document.createElement('div'); b.className = 'v';
-    b.textContent = (v === undefined || v === null || v === '') ? 'none' : String(v);
-    p.appendChild(a); p.appendChild(b);
-  }
-
+  function parse(s) { var o = {}; String(s || '').split('\n').forEach(function (line) { var i = line.indexOf('='); if (i > 0) o[line.slice(0, i)] = line.slice(i + 1); }); return o; }
+  function row(k, v) { var p = document.getElementById('status'); var a = document.createElement('div'); a.className = 'k'; a.textContent = k; var b = document.createElement('div'); b.className = 'v'; b.textContent = (v === undefined || v === null || v === '') ? 'none' : String(v); p.appendChild(a); p.appendChild(b); }
   async function refresh() {
-    if (busy) return;
-    busy = true; msg('读取中…');
+    if (busy) return; busy = true; msg('读取中…');
     try {
       var r = await execCmd('sh ' + ACTION + ' status');
       if (r.errno !== 0) throw new Error(r.stderr || ('exit ' + r.errno));
-      var d = parse(r.stdout);
-      var st = document.getElementById('status');
-      st.innerHTML = '';
+      var d = parse(r.stdout); var st = document.getElementById('status'); st.innerHTML = '';
+      row('service', d.service_state || 'unknown');
       row('supervisor', (d.supervisor_pid || 'none') + ' / uid ' + (d.supervisor_uid || 'none'));
       row('dsh', (d.dsh_pid || 'none') + ' / uid ' + (d.dsh_uid || 'none'));
       row('ttyd', (d.ttyd_pid || 'none') + ' / uid ' + (d.ttyd_uid || 'none'));
@@ -126,35 +95,20 @@
       document.getElementById('dshUrl').textContent = (d.dsh_url && d.dsh_url !== 'none') ? d.dsh_url : '尚未生成，请查看启动日志';
       document.getElementById('ttydPass').textContent = d.ttyd_pass || 'none';
       msg('已刷新');
-    } catch (e) {
-      msg('读取失败: ' + (e && e.message ? e.message : e), true);
-    } finally { busy = false; }
+    } catch (e) { msg('读取失败: ' + (e && e.message ? e.message : e), true); } finally { busy = false; }
   }
-
   async function act(args) {
-    if (busy) return;
-    busy = true; msg('执行中…');
+    if (busy) return; busy = true; msg('执行中…');
     try {
       var r = await execCmd('sh ' + ACTION + ' ' + args);
       if (r.errno !== 0) throw new Error(r.stderr || r.stdout || ('exit ' + r.errno));
-      msg(r.stdout || '已发送打开请求');
-    } catch (e) {
-      msg('失败: ' + (e && e.message ? e.message : e), true);
-    } finally { busy = false; }
+      msg(r.stdout || '已发送请求'); setTimeout(refresh, 1000);
+    } catch (e) { msg('失败: ' + (e && e.message ? e.message : e), true); } finally { busy = false; }
   }
-
   async function showLog(kind) {
-    try {
-      var r = kind === 'diag' ? await execCmd('sh ' + ACTION + ' diag') : await execCmd('sh ' + ACTION + ' log ' + kind);
-      document.getElementById('log').textContent = r.stdout || r.stderr || '(empty)';
-    } catch (e) {
-      document.getElementById('log').textContent = '读取失败: ' + (e && e.message ? e.message : e);
-    }
+    try { var r = kind === 'diag' ? await execCmd('sh ' + ACTION + ' diag') : await execCmd('sh ' + ACTION + ' log ' + kind); document.getElementById('log').textContent = r.stdout || r.stderr || '(empty)'; } catch (e) { document.getElementById('log').textContent = '读取失败: ' + (e && e.message ? e.message : e); }
   }
-
-  window.refresh = refresh;
-  window.act = act;
-  window.showLog = showLog;
+  window.refresh = refresh; window.act = act; window.showLog = showLog;
   window.onerror = function (m) { msg('页面错误: ' + m, true); };
   setTimeout(refresh, 500);
 })();

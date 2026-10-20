@@ -8,6 +8,8 @@ DATA=/data/adb/dsh
 STATE="$DATA/state"
 RUN="$DATA/run"
 LOGD="$DATA/logs"
+STOPPED="$STATE/stopped"
+mkdir -p "$STATE" "$RUN" "$LOGD"
 
 alive() { [ -n "${1:-}" ] && [ -f "$1" ] && kill -0 "$(cat "$1" 2>/dev/null)" 2>/dev/null; }
 pid_of() { alive "$1" && cat "$1" 2>/dev/null || echo none; }
@@ -26,12 +28,48 @@ open_url() {
     [ -n "$U" ] && [ "$U" != none ] || { echo "no URL available" >&2; return 1; }
     am start --user 0 -a android.intent.action.VIEW -d "$U" -f 0x10000000 2>&1
 }
+kill_pidfile() {
+    F="$1"; SIG="${2:-TERM}"
+    [ -f "$F" ] || return 0
+    P="$(cat "$F" 2>/dev/null)"
+    [ -n "$P" ] && kill "-$SIG" "$P" 2>/dev/null || true
+}
+kill_all() {
+    kill_pidfile "$RUN/service-boot.pid" TERM
+    kill_pidfile "$RUN/watchdog.pid" TERM
+    kill_pidfile "$RUN/supervisor.pid" TERM
+    kill_pidfile "$RUN/dsh.pid" TERM
+    kill_pidfile "$RUN/ttyd.pid" TERM
+    if [ -f "$RUN/bootstrap.lock/pid" ]; then
+        P="$(cat "$RUN/bootstrap.lock/pid" 2>/dev/null)"
+        [ -n "$P" ] && kill -TERM "$P" 2>/dev/null || true
+    fi
+    sleep 2
+    kill_pidfile "$RUN/service-boot.pid" KILL
+    kill_pidfile "$RUN/watchdog.pid" KILL
+    kill_pidfile "$RUN/supervisor.pid" KILL
+    kill_pidfile "$RUN/dsh.pid" KILL
+    kill_pidfile "$RUN/ttyd.pid" KILL
+    if [ -f "$RUN/bootstrap.lock/pid" ]; then
+        P="$(cat "$RUN/bootstrap.lock/pid" 2>/dev/null)"
+        [ -n "$P" ] && kill -KILL "$P" 2>/dev/null || true
+    fi
+    rm -f "$RUN/service-boot.pid" "$RUN/watchdog.pid" "$RUN/supervisor.pid" \
+          "$RUN/dsh.pid" "$RUN/ttyd.pid"
+    rm -rf "$RUN/launch.lock" "$RUN/bootstrap.lock"
+}
+unmount_all() {
+    for m in sdcard home/dsh opt/dsh var/log/dsh run/dsh run/dsh-state dev/pts dev sys proc; do
+        umount -l "$DATA/rootfs/$m" 2>/dev/null || true
+    done
+}
 
 case "${1:-status}" in
     status)
         SP="$(pid_of "$RUN/supervisor.pid")"
         DP="$(pid_of "$RUN/dsh.pid")"
         TP="$(pid_of "$RUN/ttyd.pid")"
+        if [ -f "$STOPPED" ]; then echo "service_state=stopped"; elif [ "$SP" != none ]; then echo "service_state=running"; else echo "service_state=stopped-or-failed"; fi
         echo "supervisor_pid=$SP"
         echo "supervisor_uid=$(uid_of "$SP")"
         echo "dsh_pid=$DP"
@@ -52,6 +90,27 @@ case "${1:-status}" in
             ttyd) open_url "http://127.0.0.1:7681/" ;;
             *) echo "usage: action.sh open dsh|ttyd" >&2; exit 2 ;;
         esac
+        ;;
+    start)
+        rm -f "$STOPPED"
+        if alive "$RUN/watchdog.pid" || alive "$RUN/service-boot.pid" || alive "$RUN/supervisor.pid"; then echo "already running"; exit 0; fi
+        if command -v setsid >/dev/null 2>&1; then setsid "$MODDIR/bin/dsh-service-boot" >>"$LOGD/action.log" 2>&1 & else nohup "$MODDIR/bin/dsh-service-boot" >>"$LOGD/action.log" 2>&1 & fi
+        echo "start requested"
+        ;;
+    stop)
+        touch "$STOPPED"
+        kill_all
+        unmount_all
+        echo "stopped"
+        ;;
+    restart)
+        touch "$STOPPED"
+        kill_all
+        unmount_all
+        sleep 1
+        rm -f "$STOPPED"
+        if command -v setsid >/dev/null 2>&1; then setsid "$MODDIR/bin/dsh-service-boot" >>"$LOGD/action.log" 2>&1 & else nohup "$MODDIR/bin/dsh-service-boot" >>"$LOGD/action.log" 2>&1 & fi
+        echo "restart requested"
         ;;
     log)
         case "${2:-dsh}" in
@@ -75,27 +134,6 @@ case "${1:-status}" in
         echo "=== dsh.log ==="; tail -n 200 "$LOGD/dsh.log" 2>/dev/null
         echo "=== ttyd.log ==="; tail -n 100 "$LOGD/ttyd.log" 2>/dev/null
         echo "=== mounts ==="; grep -E 'dsh|rootfs|sdcard' /proc/mounts 2>/dev/null | head -80
-        ;;
-    start)
-        setsid "$MODDIR/bin/dsh-launch" >>"$LOGD/action.log" 2>&1 &
-        ;;
-    stop)
-        for f in "$RUN/dsh.pid" "$RUN/ttyd.pid" "$RUN/supervisor.pid"; do
-            [ -f "$f" ] && kill "$(cat "$f" 2>/dev/null)" 2>/dev/null || true
-        done
-        sleep 1
-        for f in "$RUN/dsh.pid" "$RUN/ttyd.pid" "$RUN/supervisor.pid"; do
-            [ -f "$f" ] && kill -9 "$(cat "$f" 2>/dev/null)" 2>/dev/null || true
-            rm -f "$f"
-        done
-        rm -rf "$RUN/launch.lock" "$RUN/bootstrap.lock"
-        for m in sdcard home/dsh opt/dsh var/log/dsh run/dsh run/dsh-state dev/pts dev sys proc; do
-            umount -l "$DATA/rootfs/$m" 2>/dev/null || true
-        done
-        ;;
-    restart)
-        sh "$MODDIR/action.sh" stop
-        sh "$MODDIR/action.sh" start
         ;;
     *)
         echo "usage: action.sh status|open dsh|open ttyd|log [dsh|bootstrap|launch|supervisor|service|ttyd]|diag|start|stop|restart"

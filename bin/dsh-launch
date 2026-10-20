@@ -1,18 +1,18 @@
 #!/system/bin/sh
 # Root -> UID 1 launcher.
-# Acquires a single-instance lock, then execs dsh-chroot (mount + chroot + setpriv).
 case "$0" in
   */*) SCRIPT_DIR=${0%/*} ;;
   *)   SCRIPT_DIR=. ;;
 esac
 MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)
 DATA=/data/adb/dsh
+STATE="$DATA/state"
 RUN="$DATA/run"
 LOCK="$RUN/launch.lock"
-mkdir -p "$RUN" "$DATA/logs" "$DATA/state" "$DATA/home" "$DATA/opt/dsh" "$DATA/npm-global" "$DATA/npm-cache" "$DATA/pnpm-store"
+mkdir -p "$RUN" "$DATA/logs" "$STATE" "$DATA/home" "$DATA/opt/dsh" "$DATA/npm-global" "$DATA/npm-cache" "$DATA/pnpm-store"
 
-# Inherited by all children.
 echo -1000 > /proc/self/oom_score_adj 2>/dev/null || true
+[ -f "$STATE/stopped" ] && exit 0
 
 if [ -d "$LOCK" ]; then
     OLD="$(cat "$LOCK/pid" 2>/dev/null)"
@@ -27,7 +27,6 @@ fi
 echo $$ > "$LOCK/pid"
 echo $$ > "$RUN/supervisor.pid"
 
-# Prefer raw media; fall back to FUSE only if raw is unavailable.
 SDCARD=/data/media/0
 [ -d "$SDCARD" ] || SDCARD=/storage/emulated/0
 [ -d "$SDCARD" ] || SDCARD=/sdcard

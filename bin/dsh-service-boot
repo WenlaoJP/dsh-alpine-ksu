@@ -7,8 +7,13 @@ esac
 MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)
 DATA=/data/adb/dsh
 PIDFILE="$DATA/run/supervisor.pid"
+STATE="$DATA/state"
+mkdir -p "$DATA/run" "$STATE" "$DATA/logs"
+echo $$ >"$DATA/run/service-boot.pid"
 echo -1000 > /proc/self/oom_score_adj 2>/dev/null || true
+[ -f "$STATE/stopped" ] && exit 0
 sleep 10
+[ -f "$STATE/stopped" ] && exit 0
 # /data/media/0 may not be available until user 0 is unlocked.
 i=0
 while [ ! -d /data/media/0 ] && [ "$i" -lt 60 ]; do
@@ -16,8 +21,10 @@ while [ ! -d /data/media/0 ] && [ "$i" -lt 60 ]; do
     i=$((i + 1))
 done
 while ! "$MODDIR/bin/dsh-bootstrap" >>"$DATA/logs/bootstrap-launch.log" 2>&1; do
+    [ -f "$STATE/stopped" ] && exit 0
     sleep 10
 done
+[ -f "$STATE/stopped" ] && exit 0
 if [ -f "$PIDFILE" ]; then
     PID="$(cat "$PIDFILE" 2>/dev/null)"
     if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
