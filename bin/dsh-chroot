@@ -34,9 +34,15 @@ if ! is_mounted "$ROOTFS/dev/pts"; then
 fi
 bind_one /proc "$ROOTFS/proc"
 bind_one /sys "$ROOTFS/sys"
-SDCARD_SRC=/storage/emulated/0
+
+# Android 11+ /sdcard is a MediaProvider FUSE mount. UID 1 (non-app UID)
+# can get EFAULT from FUSE open/create even with allow_other. Prefer the raw
+# media view to avoid the FUSE daemon entirely.
+SDCARD_SRC=/data/media/0
+[ -d "$SDCARD_SRC" ] || SDCARD_SRC=/storage/emulated/0
 [ -d "$SDCARD_SRC" ] || SDCARD_SRC=/sdcard
 bind_one "$SDCARD_SRC" "$ROOTFS/sdcard"
+
 bind_one "$DATA/home" "$ROOTFS/home/dsh"
 bind_one "$DATA/opt/dsh" "$ROOTFS/opt/dsh"
 bind_one "$DATA/logs" "$ROOTFS/var/log/dsh"
