@@ -9,6 +9,12 @@ DATA=/data/adb/dsh
 PIDFILE="$DATA/run/supervisor.pid"
 echo -1000 > /proc/self/oom_score_adj 2>/dev/null || true
 sleep 10
+# /data/media/0 may not be available until user 0 is unlocked.
+i=0
+while [ ! -d /data/media/0 ] && [ "$i" -lt 60 ]; do
+    sleep 5
+    i=$((i + 1))
+done
 while ! "$MODDIR/bin/dsh-bootstrap" >>"$DATA/logs/bootstrap-launch.log" 2>&1; do
     sleep 10
 done
